@@ -9,7 +9,7 @@ A clock for a 32 × 8 dot-matrix display built from four MAX7219 modules, driven
 - **Fonts:** `tom-thumb.bdf` (3×5, MIT) is included, ESPHome downloads Micro 5 from Google Fonts, and `MobileFont.ttf` has to be downloaded separately (see Installation).
 - **Home Assistant:** connects over the native API; styles, the timer, dice and breathing exercise are exposed as entities.
 
-Pick a style with the **Clock Style** entity in Home Assistant or in the device's web interface (port 80). The last choice survives a power loss. The option names in Home Assistant are in Slovak; they are shown in brackets below.
+Pick a style with the **Clock Style** entity in Home Assistant or in the device's web interface (port 80). The last choice survives a power loss.
 
 ## Styles
 
@@ -17,26 +17,26 @@ Pick a style with the **Clock Style** entity in Home Assistant or in the device'
 |---|---|---|
 | 0 | **Tom Thumb HH:MM:SS** – 3×5 digits, all the same width | ![](docs/dotmatrix-clock/00-tom-thumb.svg) |
 | 1 | **Micro 5 HH:MM:SS** – narrower colons | ![](docs/dotmatrix-clock/01-micro5.svg) |
-| 2 | **Seconds bar, top** (`MobileFont + sekundový pásik`) – fills up until :30, then empties from the left | ![](docs/dotmatrix-clock/02-pasik-hore.svg) |
-| 3 | **Seconds bar, bottom** (`MobileFont + sekundový pásik dole`) | ![](docs/dotmatrix-clock/03-pasik-dole.svg) |
-| 4 | **Original** (`Pôvodné`) – a dash in the top row moves every two seconds | ![](docs/dotmatrix-clock/04-povodne.svg) |
-| 5 | **Binary clock** (`Binárne hodiny`) – 8-4-2-1 columns for HH MM SS | ![](docs/dotmatrix-clock/05-binarne.svg) |
-| 6 | **Rolling digits** (`Rolujúce číslice`) – a changing digit rolls up like a mechanical counter | ![](docs/dotmatrix-clock/06-rolujuce.svg) |
-| 7 | **Time and outdoor temperature** (`Čas a vonkajšia teplota`) – 7 s time, 3 s temperature from `weather.domov` | ![](docs/dotmatrix-clock/07-teplota.svg) |
-| 8 | **Time and weekday** (`Čas a deň v týždni`) – Monday to Sunday markers, today fully lit | ![](docs/dotmatrix-clock/08-den-v-tyzdni.svg) |
-| 9 | **Hourglass seconds** (`Presýpacie sekundy`) – one grain of sand drops onto a pile every second | ![](docs/dotmatrix-clock/09-presypacie.svg) |
-| 10 | **Time falls apart** (`Čas, ktorý sa rozpadne`) – from :50 the digits turn into Conway's Game of Life | ![](docs/dotmatrix-clock/10-rozpad.svg) |
-| 11 | **Pac-Man eats the minute** (`Pac-Man zje minútu`) – on every new minute Pac-Man eats the old HH:MM | ![](docs/dotmatrix-clock/11-pacman.svg) |
-| 12 | **Live weather** (`Živé počasie`) – animated icon based on `weather.domov` | ![](docs/dotmatrix-clock/12-pocasie.svg) |
-| 13 | **Analog watch** (`Ručičkové hodinky`) – 8×8 dial with hands and a seconds dot running around the edge | ![](docs/dotmatrix-clock/13-rucickove.svg) |
-| 14 | **Time emerges from the rain** (`Čas vystúpi z dažďa`) – digit pixels stick as drops pass through them | ![](docs/dotmatrix-clock/14-dazd.svg) |
-| 15 | **The day in 256 dots** (`Deň v 256 bodoch`) – each dot is 5.6 minutes of the day | ![](docs/dotmatrix-clock/15-den-256.svg) |
-| 16 | **Moon phase** (`Fáza Mesiaca`) – computed on the device, with a lunar-cycle bar | ![](docs/dotmatrix-clock/16-mesiac.svg) |
-| 17 | **Temperature, last 24 hours** (`Teplota za 24 hodín`) – bar chart, one sample every 45 minutes | ![](docs/dotmatrix-clock/17-graf-teploty.svg) |
-| 18 | **Snake around the clock** (`Had okolo hodín`) – a snake runs along the border and grows every second | ![](docs/dotmatrix-clock/18-had.svg) |
-| 19 | **Pong plays for time** (`Pong hrá o čas`) – left score is hours, right score is minutes | ![](docs/dotmatrix-clock/19-pong.svg) |
-| 20 | **Warp to the next minute** (`Warp do novej minúty`) – stars speed up until the jump | ![](docs/dotmatrix-clock/20-warp.svg) |
-| 21 | **Month in columns** (`Mesiac v stĺpcoch`) – one column per day, weekends marked on top | ![](docs/dotmatrix-clock/21-kalendar.svg) |
+| 2 | **Seconds Bar Top** – fills up until :30, then empties from the left | ![](docs/dotmatrix-clock/02-pasik-hore.svg) |
+| 3 | **Seconds Bar Bottom** | ![](docs/dotmatrix-clock/03-pasik-dole.svg) |
+| 4 | **Original** – a dash in the top row moves every two seconds | ![](docs/dotmatrix-clock/04-povodne.svg) |
+| 5 | **Binary Clock** – 8-4-2-1 columns for HH MM SS | ![](docs/dotmatrix-clock/05-binarne.svg) |
+| 6 | **Rolling Digits** – a changing digit rolls up like a mechanical counter | ![](docs/dotmatrix-clock/06-rolujuce.svg) |
+| 7 | **Time and Outdoor Temperature** – 7 s time, 3 s temperature from `weather.domov` | ![](docs/dotmatrix-clock/07-teplota.svg) |
+| 8 | **Time and Weekday** – Monday to Sunday markers, today fully lit | ![](docs/dotmatrix-clock/08-den-v-tyzdni.svg) |
+| 9 | **Hourglass Seconds** – one grain of sand drops onto a pile every second | ![](docs/dotmatrix-clock/09-presypacie.svg) |
+| 10 | **Time Falls Apart** – from :50 the digits turn into Conway's Game of Life | ![](docs/dotmatrix-clock/10-rozpad.svg) |
+| 11 | **Pac-Man Eats the Minute** – on every new minute Pac-Man eats the old HH:MM | ![](docs/dotmatrix-clock/11-pacman.svg) |
+| 12 | **Live Weather** – animated icon based on `weather.domov` | ![](docs/dotmatrix-clock/12-pocasie.svg) |
+| 13 | **Analog Watch** – 8×8 dial with hands and a seconds dot running around the edge | ![](docs/dotmatrix-clock/13-rucickove.svg) |
+| 14 | **Time Emerges from the Rain** – digit pixels stick as drops pass through them | ![](docs/dotmatrix-clock/14-dazd.svg) |
+| 15 | **The Day in 256 Dots** – each dot is 5.6 minutes of the day | ![](docs/dotmatrix-clock/15-den-256.svg) |
+| 16 | **Moon Phase** – computed on the device, with a lunar-cycle bar | ![](docs/dotmatrix-clock/16-mesiac.svg) |
+| 17 | **Temperature, Last 24 Hours** – bar chart, one sample every 45 minutes | ![](docs/dotmatrix-clock/17-graf-teploty.svg) |
+| 18 | **Snake Around the Clock** – a snake runs along the border and grows every second | ![](docs/dotmatrix-clock/18-had.svg) |
+| 19 | **Pong Plays for Time** – left score is hours, right score is minutes | ![](docs/dotmatrix-clock/19-pong.svg) |
+| 20 | **Warp to the Next Minute** – stars speed up until the jump | ![](docs/dotmatrix-clock/20-warp.svg) |
+| 21 | **Month in Columns** – one column per day, weekends marked on top | ![](docs/dotmatrix-clock/21-kalendar.svg) |
 | 22 | **Matrix** – digital rain that forms the time and then scatters again | ![](docs/dotmatrix-clock/22-matrix-3-cas.svg) |
 
 The temperature chart (17) lives only in the device's memory: it starts over after a restart and shows a full day after 24 hours.
@@ -52,7 +52,7 @@ The temperature chart (17) lives only in the device's memory: it starts over aft
 
 ## Home Assistant extras
 
-While active, these replace whichever style is selected.
+These entities keep their Slovak names in Home Assistant (shown in brackets). While active, they replace whichever style is selected.
 
 | Entity | What it does | Preview |
 |---|---|---|
