@@ -52,13 +52,13 @@ The temperature chart (17) lives only in the device's memory: it starts over aft
 
 ## Home Assistant extras
 
-These entities keep their Slovak names in Home Assistant (shown in brackets). While active, they replace whichever style is selected.
+While active, these replace whichever style is selected.
 
 | Entity | What it does | Preview |
 |---|---|---|
-| **Timer minutes**, **Start timer**, **Cancel timer** (`Minútka (min)`, `Spustiť minútku`, `Zrušiť minútku`) | MM:SS countdown with a shrinking bar, blinks for 5 s at the end | ![](docs/dotmatrix-clock/overlay-minutka.svg) |
-| **4-7-8 breathing** (`Dýchanie 4-7-8`) | 4 s inhale, 7 s hold, 8 s exhale, four rounds | ![](docs/dotmatrix-clock/overlay-dychanie.svg) |
-| **Roll the dice** (`Hoď kockou`) | two dice tumble, then show the result for 8 s | ![](docs/dotmatrix-clock/overlay-kocky.svg) |
+| **Timer Minutes**, **Start Timer**, **Cancel Timer** | MM:SS countdown with a shrinking bar, blinks for 5 s at the end | ![](docs/dotmatrix-clock/overlay-minutka.svg) |
+| **Breathing 4-7-8** | 4 s inhale, 7 s hold, 8 s exhale, four rounds | ![](docs/dotmatrix-clock/overlay-dychanie.svg) |
+| **Roll Dice** | two dice tumble, then show the result for 8 s | ![](docs/dotmatrix-clock/overlay-kocky.svg) |
 | **Restart** | restarts the device | |
 
 ## Installation

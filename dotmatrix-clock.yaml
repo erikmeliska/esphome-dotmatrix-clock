@@ -143,7 +143,7 @@ display:
 
       // ---- overlays: they replace whatever style is selected while active ----
 
-      // dice roll (button "Hoď kockou")
+      // dice roll (button "Roll Dice")
       if (id(dice_at) != 0) {
         uint32_t e = millis() - id(dice_at);
         if (e < 9000) {
@@ -166,7 +166,7 @@ display:
         id(dice_at) = 0;
       }
 
-      // 4-7-8 breathing (switch "Dýchanie 4-7-8"): 4 s in, 7 s hold, 8 s out, four rounds
+      // 4-7-8 breathing (switch "Breathing 4-7-8"): 4 s in, 7 s hold, 8 s out, four rounds
       if (id(breath_start) != 0) {
         uint32_t e = millis() - id(breath_start);
         if (e >= 4 * 19000) {
@@ -188,7 +188,7 @@ display:
         }
       }
 
-      // kitchen timer (buttons "Spustiť minútku" / "Zrušiť minútku")
+      // kitchen timer (buttons "Start Timer" / "Cancel Timer")
       if (id(timer_end) != 0) {
         int rem = (int) (id(timer_end) - (uint32_t) now.timestamp);
         if (rem > 0) {
@@ -687,7 +687,7 @@ select:
 
 number:
   - platform: template
-    name: "Minútka (min)"
+    name: "Timer Minutes"
     id: timer_minutes
     min_value: 1
     max_value: 99
@@ -698,7 +698,7 @@ number:
 
 switch:
   - platform: template
-    name: "Dýchanie 4-7-8"
+    name: "Breathing 4-7-8"
     id: breath_switch
     optimistic: true
     turn_on_action:
@@ -757,17 +757,17 @@ button:
   - platform: restart
     name: "Restart"
   - platform: template
-    name: "Spustiť minútku"
+    name: "Start Timer"
     on_press:
       - lambda: |-
           id(timer_total) = (int) id(timer_minutes).state * 60;
           id(timer_end) = id(clock_time).now().timestamp + id(timer_total);
   - platform: template
-    name: "Zrušiť minútku"
+    name: "Cancel Timer"
     on_press:
       - lambda: 'id(timer_end) = 0;'
   - platform: template
-    name: "Hoď kockou"
+    name: "Roll Dice"
     on_press:
       - lambda: |-
           id(dice_at) = millis();
