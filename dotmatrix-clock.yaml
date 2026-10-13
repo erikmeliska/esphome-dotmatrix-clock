@@ -1,0 +1,775 @@
+esphome:
+  name: dotmatrix-clock
+
+esp8266:
+  board: esp12e
+  # keep the selected clock style across power loss (RTC memory alone survives only a soft reset)
+  restore_from_flash: true
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Dotmatrix-Clock Fallback Hotspot"
+    password: !secret dotmatrix_clock_ap_password
+
+captive_portal:
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+ota:
+  - platform: esphome
+
+web_server:
+  port: 80
+
+# Example configuration entry
+spi:
+  clk_pin: GPIO14
+  mosi_pin: GPIO5
+
+globals:
+  # kitchen timer: epoch when it runs out (0 = off) and its full length in seconds
+  - id: timer_end
+    type: uint32_t
+    initial_value: '0'
+  - id: timer_total
+    type: int
+    initial_value: '60'
+  # 4-7-8 breathing exercise: millis() when it started, 0 = off
+  - id: breath_start
+    type: uint32_t
+    initial_value: '0'
+  # dice: millis() of the roll (0 = no dice on screen) and the two results
+  - id: dice_at
+    type: uint32_t
+    initial_value: '0'
+  - id: dice_a
+    type: int
+    initial_value: '1'
+  - id: dice_b
+    type: int
+    initial_value: '1'
+  # outside temperature history for the 24 h chart: 32 samples, one every 45 min
+  - id: temp_hist
+    type: std::array<float, 32>
+  - id: temp_count
+    type: int
+    initial_value: '0'
+
+display:
+  - platform: max7219digit
+    cs_pin: GPIO0
+    num_chips: 4
+    intensity: 0
+    # drawing past x = 31 would widen the buffer and start the built-in text scrolling
+    scroll_enable: false
+    # redraw often so a new second shows up within ~50 ms (default is 500 ms)
+    update_interval: 50ms
+    lambda: |-
+      auto now = id(clock_time).now();
+      if (!now.is_valid()) {  // no SNTP time yet
+        it.print(4, 0, id(digit_font), "--:--");
+        return;
+      }
+      int sec = now.second;
+
+      // sub-second clock time: millis() since the clock's second last changed
+      static int ss_sec = -1;
+      static uint32_t ss_ms = 0;
+      if (sec != ss_sec) { ss_sec = sec; ss_ms = millis(); }
+      uint32_t sub_ms = std::min<uint32_t>(millis() - ss_ms, 999);
+      float t = sec + sub_ms / 1000.0f;
+
+      // MAX7219Component hides the colour-less draw_pixel_at() overload
+      auto dot = [&](int x, int y) {
+        if (x >= 0 && x < 32 && y >= 0 && y < 8) it.draw_pixel_at(x, y, COLOR_ON);
+      };
+
+      // Tom Thumb 3x5 digits (same shapes as tom_font) for styles that need the time as a bitmap
+      static const uint8_t DIG[10][5] = {
+        {0x3, 0x5, 0x5, 0x5, 0x6}, {0x2, 0x6, 0x2, 0x2, 0x2}, {0x6, 0x1, 0x2, 0x4, 0x7},
+        {0x6, 0x1, 0x2, 0x1, 0x6}, {0x5, 0x5, 0x7, 0x1, 0x1}, {0x7, 0x4, 0x6, 0x1, 0x6},
+        {0x3, 0x4, 0x7, 0x5, 0x7}, {0x7, 0x1, 0x2, 0x4, 0x4}, {0x7, 0x5, 0x7, 0x5, 0x7},
+        {0x7, 0x5, 0x7, 0x1, 0x6}};
+      // HH:MM in Tom Thumb at x = 6, y = 1 as a 32x8 bit mask (bit x of mask[y])
+      auto time_mask = [&](uint32_t mask[8]) {
+        int digits[4] = {now.hour / 10, now.hour % 10, now.minute / 10, now.minute % 10};
+        const int xs[4] = {6, 10, 18, 22};
+        for (int y = 0; y < 8; y++) mask[y] = 0;
+        for (int i = 0; i < 4; i++)
+          for (int r = 0; r < 5; r++)
+            for (int c = 0; c < 3; c++)
+              if ((DIG[digits[i]][r] >> (2 - c)) & 1)
+                mask[1 + r] |= 1u << (xs[i] + c);
+        mask[2] |= 1u << 15;  // colon
+        mask[4] |= 1u << 15;
+      };
+      // draw rows of a small bitmap, MSB = leftmost pixel
+      auto bits = [&](const uint8_t *rows, int n, int width, int x0, int y0) {
+        for (int r = 0; r < n; r++)
+          for (int c = 0; c < width; c++)
+            if ((rows[r] >> (width - 1 - c)) & 1)
+              dot(x0 + c, y0 + r);
+      };
+      // seconds bar over pixels 1-30 of one row: empty at 0 s, fills from the left
+      // during 1-30 s, then empties from the left during 31-59 s
+      auto seconds_bar = [&](int row) {
+        if (sec >= 1 && sec <= 30)
+          it.line(1, row, sec, row);
+        else if (sec > 30)
+          it.line(sec - 29, row, 30, row);
+      };
+      // temperature centred in MobileFont with a hand-drawn degree sign (the font has none)
+      auto print_temp = [&](float value) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%.1f", value);
+        int bx, by, bw, bh;
+        it.get_text_bounds(0, 0, buf, id(digit_font), TextAlign::TOP_LEFT, &bx, &by, &bw, &bh);
+        int x = (32 - bw - 4) / 2;
+        it.print(x, 0, id(digit_font), buf);
+        int dx = x + bw + 2;
+        dot(dx, 1);
+        dot(dx - 1, 2);
+        dot(dx + 1, 2);
+        dot(dx, 3);
+      };
+
+      // ---- overlays: they replace whatever style is selected while active ----
+
+      // dice roll (button "Hoď kockou")
+      if (id(dice_at) != 0) {
+        uint32_t e = millis() - id(dice_at);
+        if (e < 9000) {
+          static const int POS[7][2] = {{0, 0}, {6, 0}, {0, 3}, {6, 3}, {0, 6}, {6, 6}, {3, 3}};
+          static const uint8_t FACE[7] = {0, 64, 33, 97, 51, 115, 63};  // bit k = 2x2 pip at POS[k]
+          auto die = [&](int x0, int v) {
+            for (int k = 0; k < 7; k++)
+              if ((FACE[v] >> k) & 1) it.filled_rectangle(x0 + POS[k][0], POS[k][1], 2, 2);
+          };
+          if (e < 1200) {  // tumbling
+            int s = e / 80;
+            die(6 + s % 2, 1 + (s * 7 + 3) % 6);
+            die(18 - s % 2, 1 + (s * 5 + 1) % 6);
+          } else {
+            die(6, id(dice_a));
+            die(18, id(dice_b));
+          }
+          return;
+        }
+        id(dice_at) = 0;
+      }
+
+      // 4-7-8 breathing (switch "Dýchanie 4-7-8"): 4 s in, 7 s hold, 8 s out, four rounds
+      if (id(breath_start) != 0) {
+        uint32_t e = millis() - id(breath_start);
+        if (e >= 4 * 19000) {
+          id(breath_start) = 0;
+          id(breath_switch).publish_state(false);
+        } else {
+          float c = (e % 19000) / 1000.0f;
+          float p = c < 4 ? c / 4 : c < 11 ? 1 : 1 - (c - 11) / 8;
+          int w = 2 + (int) roundf(30 * p), h = 2 + (int) roundf(6 * p);
+          int x = 16 - w / 2, y = 4 - h / 2;
+          if (c >= 4 && c < 11) {
+            it.rectangle(x, y, w, h);
+            int left = 7 - (int) (c - 4);  // hold countdown dots
+            for (int i = 0; i < left; i++) dot(13 + i, 4);
+          } else {
+            it.filled_rectangle(x, y, w, h);
+          }
+          return;
+        }
+      }
+
+      // kitchen timer (buttons "Spustiť minútku" / "Zrušiť minútku")
+      if (id(timer_end) != 0) {
+        int rem = (int) (id(timer_end) - (uint32_t) now.timestamp);
+        if (rem > 0) {
+          it.printf(1, 0, id(digit_font), "%02d:%02d", rem / 60, rem % 60);
+          it.line(1, 0, 1 + 29 * rem / id(timer_total), 0);
+          return;
+        }
+        if (rem > -5) {  // 5 s of blinking when it runs out
+          if ((millis() / 250) % 2)
+            it.fill(COLOR_ON);
+          return;
+        }
+        id(timer_end) = 0;
+      }
+
+      // ---- clock styles ----
+      switch (id(clock_style).active_index().value_or(0)) {
+        default:
+        case 0:  // Tom Thumb 3x5, HH:MM:SS (31 px)
+          it.strftime(0, 1, id(tom_font), "%H:%M:%S", now);
+          break;
+
+        case 1:  // Micro 5, HH:MM:SS (27 px)
+          it.strftime(2, -2, id(micro_font), "%H:%M:%S", now);
+          break;
+
+        case 2:  // MobileFont HH:MM, seconds bar in the top row
+          seconds_bar(0);
+          it.strftime(2, 0, id(digit_font), "%H:%M", now);
+          break;
+
+        case 3:  // MobileFont HH:MM moved up, seconds bar in the bottom row
+          it.strftime(2, -1, id(digit_font), "%H:%M", now);
+          seconds_bar(7);
+          break;
+
+        case 4: {  // original: MobileFont HH:MM + moving seconds dash
+          int pos1 = sec / 2;
+          int pos2 = (sec + 1) / 2;
+          it.line(pos1 + 1, 0, pos2 + 1, 0);
+          it.strftime(2, 0, id(digit_font), "%H:%M", now);
+          break;
+        }
+
+        case 5: {  // binary clock (BCD): one column of 2x2 blocks per digit, 8-4-2-1 from the top
+          int digits[6] = {now.hour / 10, now.hour % 10, now.minute / 10, now.minute % 10, sec / 10, sec % 10};
+          const int xs[6] = {4, 7, 13, 16, 22, 25};
+          for (int i = 0; i < 6; i++)
+            for (int bit = 0; bit < 4; bit++)
+              if ((digits[i] >> bit) & 1)
+                it.filled_rectangle(xs[i], 6 - 2 * bit, 2, 2);
+          break;
+        }
+
+        case 6: {  // Tom Thumb HH:MM:SS, changed digits roll up over 250 ms
+          static char shown[9] = "", old[9] = "";
+          static uint32_t changed_at = 0;
+          char cur[9];
+          now.strftime(cur, sizeof(cur), "%H:%M:%S");
+          if (strcmp(cur, shown) != 0) {
+            strcpy(old, shown);
+            strcpy(shown, cur);
+            changed_at = millis();
+          }
+          int shift = std::min<int>((millis() - changed_at) * 6 / 250, 6);
+          for (int i = 0; i < 8; i++) {
+            char n[2] = {cur[i], 0}, o[2] = {old[i], 0};
+            if (shift < 6 && old[0] && cur[i] != old[i]) {
+              it.start_clipping(4 * i, 1, 4 * i + 4, 6);  // right/bottom are exclusive
+              it.print(4 * i, 1 - shift, id(tom_font), o);
+              it.print(4 * i, 7 - shift, id(tom_font), n);
+              it.end_clipping();
+            } else {
+              it.print(4 * i, 1, id(tom_font), n);
+            }
+          }
+          break;
+        }
+
+        case 7: {  // time for 7 s, outside temperature for 3 s
+          float temp = id(outside_temp).state;
+          if (sec % 10 < 7 || std::isnan(temp))
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+          else
+            print_temp(temp);
+          break;
+        }
+
+        case 8: {  // Tom Thumb HH:MM:SS + Monday..Sunday markers in the bottom row
+          it.strftime(0, 0, id(tom_font), "%H:%M:%S", now);
+          int today = (now.day_of_week + 5) % 7;  // ESPHome: 1 = Sunday; here 0 = Monday
+          for (int d = 0; d < 7; d++) {
+            int x = 2 + 4 * d;
+            if (d == today)
+              it.line(x, 7, x + 2, 7);
+            else
+              dot(x + 1, 7);
+          }
+          break;
+        }
+
+        case 9: {  // HH:MM left, one sand grain per second piling up on the right
+          static const int order[11] = {5, 4, 6, 3, 7, 2, 8, 1, 9, 0, 10};  // pile grows from the middle
+          it.strftime(0, 1, id(tom_font), "%H:%M", now);
+          for (int i = 0; i < sec; i++) {
+            int y = 7 - i / 11;
+            if (i == sec - 1 && sub_ms < 400)
+              y = y * sub_ms / 400;  // newest grain is still falling
+            dot(21 + order[i % 11], y);
+          }
+          break;
+        }
+
+        case 10: {  // HH:MM until :50, then the digits turn into Conway's Game of Life
+          static uint32_t grid[8];
+          static bool running = false;
+          static uint32_t last_step = 0;
+          if (sec < 50) {
+            running = false;
+            it.strftime(6, 1, id(tom_font), "%H:%M", now);
+            break;
+          }
+          if (!running) {
+            time_mask(grid);
+            running = true;
+            last_step = millis();
+          }
+          while (millis() - last_step >= 200) {  // 5 generations per second, edges wrap around
+            last_step += 200;
+            uint32_t next[8] = {0};
+            for (int y = 0; y < 8; y++)
+              for (int x = 0; x < 32; x++) {
+                int n = 0;
+                for (int dy = -1; dy <= 1; dy++)
+                  for (int dx = -1; dx <= 1; dx++)
+                    if (dx || dy)
+                      n += (grid[(y + dy + 8) % 8] >> ((x + dx + 32) % 32)) & 1;
+                bool alive = (grid[y] >> x) & 1;
+                if (n == 3 || (alive && n == 2))
+                  next[y] |= 1u << x;
+              }
+            memcpy(grid, next, sizeof(grid));
+          }
+          for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 32; x++)
+              if ((grid[y] >> x) & 1)
+                dot(x, y);
+          break;
+        }
+
+        case 11: {  // Pac-Man eats the old minute and leaves the new one behind
+          static const uint8_t PAC[2][7] = {{0x1C, 0x3E, 0x78, 0x70, 0x78, 0x3E, 0x1C},   // mouth open
+                                            {0x1C, 0x3E, 0x7F, 0x7F, 0x7F, 0x3E, 0x1C}};  // mouth closed
+          static int last_min = -1;
+          static uint32_t started = 0;
+          if (now.minute != last_min) {
+            started = last_min < 0 ? millis() - 1500 : millis();  // no run right after boot
+            last_min = now.minute;
+          }
+          uint32_t age = millis() - started;
+          if (age >= 1500) {
+            seconds_bar(0);
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+            break;
+          }
+          int x = -7 + (int) (age * 46 / 1500);  // walks from x = -7 to x = 39
+          ESPTime prev = ESPTime::from_epoch_local(now.timestamp - 60);
+          if (x > 0) {  // new time behind Pac-Man
+            it.start_clipping(0, 0, x, 8);
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+            it.end_clipping();
+          }
+          if (x + 7 < 32) {  // old time still ahead of him
+            it.start_clipping(std::max(x + 7, 0), 0, 32, 8);
+            it.strftime(2, 0, id(digit_font), "%H:%M", prev);
+            it.end_clipping();
+          }
+          bits(PAC[(age / 100) % 2], 7, 7, x, 1);
+          break;
+        }
+
+        case 12: {  // HH:MM left, animated weather icon on the right (x 21-31)
+          static const uint8_t CLOUD[4] = {0x60, 0xF6, 0xFF, 0x7E};       // 8 px wide
+          static const uint8_t MOON[5] = {0x0E, 0x18, 0x18, 0x18, 0x0E};  // 5 px wide
+          it.strftime(0, 1, id(tom_font), "%H:%M", now);
+          uint32_t ms = millis();
+          int drift = (ms / 1000) % 2;
+          const std::string &st = id(weather_state).state;
+          if (st == "sunny" || st == "partlycloudy") {
+            it.filled_rectangle(25, 2, 3, 3);
+            if ((ms / 500) % 2) {
+              dot(26, 0); dot(26, 6); dot(23, 3); dot(29, 3);
+            } else {
+              dot(24, 1); dot(28, 1); dot(24, 5); dot(28, 5);
+            }
+            if (st == "partlycloudy") {
+              it.filled_rectangle(21, 4, 11, 4, COLOR_OFF);
+              bits(CLOUD, 4, 8, 22 + drift, 4);
+            }
+          } else if (st == "rainy" || st == "pouring" || st == "lightning-rainy") {
+            bits(CLOUD, 4, 8, 22 + drift, 0);
+            const int xs[5] = {23, 26, 29, 25, 28};
+            for (int k = 0; k < 5; k++)
+              dot(xs[k], 4 + (ms / 120 + k * 2) % 4);
+          } else if (st == "snowy" || st == "snowy-rainy") {
+            const int xs[6] = {22, 25, 28, 31, 24, 30};
+            for (int k = 0; k < 6; k++)
+              dot(xs[k] + (ms / 700 + k) % 2, (ms / 400 + k * 3) % 8);
+          } else if (st == "clear-night") {
+            bits(MOON, 5, 5, 22, 1);
+            const int sx[3] = {29, 31, 28}, sy[3] = {1, 4, 6};
+            for (int k = 0; k < 3; k++)
+              if ((ms / 300 + k * 3) % 5)
+                dot(sx[k], sy[k]);
+          } else if (st == "fog") {
+            for (int k = 0; k < 3; k++)
+              for (int x = 21; x < 32; x++)
+                if ((x + ms / 300 + k) % 3)
+                  dot(x, 2 + 2 * k);
+          } else {  // cloudy and anything else
+            bits(CLOUD, 4, 8, 22 + drift, 2);
+          }
+          break;
+        }
+
+        case 13: {  // tiny analog dial in the first 8x8 module + digital HH:MM next to it
+          // seconds dot runs clockwise around the 8x8 border (28 px), starting at the top middle
+          int p = (4 + sec * 28 / 60) % 28, x, y;
+          if (p < 8)       { x = p;      y = 0; }
+          else if (p < 15) { x = 7;      y = p - 7; }
+          else if (p < 22) { x = 21 - p; y = 7; }
+          else             { x = 0;      y = 28 - p; }
+          dot(x, y);
+          it.line_at_angle(3, 3, now.minute * 6 - 90, 3);                          // minute hand
+          it.line_at_angle(3, 3, (now.hour % 12) * 30 + now.minute / 2 - 90, 2);  // hour hand
+          it.strftime(12, 1, id(tom_font), "%H:%M", now);
+          break;
+        }
+
+        case 14: {  // Matrix rain; digit pixels "stick" after 1-6 drops pass, so the time slowly emerges
+          uint32_t mask[8];
+          time_mask(mask);
+          for (int x = 0; x < 32; x++) {
+            uint32_t hx = x * 2654435761u;
+            float speed = 5 + (hx >> 8) % 4;
+            int phase = (hx >> 16) % 16;
+            float head = phase + speed * t;
+            for (int k = 0; k < 3; k++) {  // drop with a 3 px tail, 16-row cycle (8 of them off screen)
+              int y = (((int) floorf(head) - k) % 16 + 16) % 16;
+              if (y < 8) dot(x, y);
+            }
+            for (int y = 0; y < 8; y++) {
+              if (!((mask[y] >> x) & 1)) continue;
+              int k0 = (phase - y + 15) / 16;
+              int passes = (int) floorf((head - y) / 16) - k0 + 1;
+              int needed = 1 + ((uint32_t) (x * 31 + y * 17) * 2654435761u >> 28) % 6;
+              if (passes >= needed) dot(x, y);
+            }
+          }
+          break;
+        }
+
+        case 15: {  // the whole day as 256 pixels (5.6 min each), snaking up and down column by column
+          if (sec % 15 < 3) {  // every 15 s show the exact time for 3 s
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+            break;
+          }
+          int filled = (now.hour * 60 + now.minute) * 256 / 1440;
+          for (int i = 0; i <= filled && i < 256; i++) {
+            if (i == filled && (millis() / 500) % 2) continue;  // current pixel blinks
+            int x = i / 8, y = (x % 2 == 0) ? 7 - i % 8 : i % 8;
+            dot(x, y);
+          }
+          break;
+        }
+
+        case 16: {  // moon phase in the first 8x8 module, HH:MM and a lunar-cycle bar on the right
+          const float SYNODIC = 29.530588853f;
+          float age = fmodf((now.timestamp - 947182440) / 86400.0f, SYNODIC);  // days since a known new moon
+          float f = age / SYNODIC, k = cosf(2 * M_PI * f);
+          for (int y = 0; y < 8; y++)
+            for (int x = 0; x < 8; x++) {
+              float dy = y + 0.5f - 4, dx = x + 0.5f - 4, r2 = 3.6f * 3.6f - dy * dy;
+              if (r2 <= 0) continue;
+              float half = sqrtf(r2);
+              if (fabsf(dx) > half) continue;
+              float u = dx / half;
+              bool lit = f < 0.5f ? u > k : u < -k;  // waxing lights the right side, waning the left
+              if (lit || fabsf(dx) > half - 1)      // outline always visible
+                dot(x, y);
+            }
+          it.strftime(12, 0, id(tom_font), "%H:%M", now);
+          it.line(12, 7, 12 + (int) roundf(f * 18), 7);  // progress through the cycle
+          it.line(21, 6, 21, 7);                         // full moon mark
+          break;
+        }
+
+        case 17: {  // 24 h outside temperature bar chart, auto-scaled; current value every 10 s
+          auto &h = id(temp_hist);
+          int n = id(temp_count);
+          if (n == 0) {  // nothing recorded yet
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+            break;
+          }
+          if (sec % 10 < 3) {
+            print_temp(h[31]);
+            break;
+          }
+          float lo = 1e9, hi = -1e9;
+          for (int i = 32 - n; i < 32; i++) { lo = std::min(lo, h[i]); hi = std::max(hi, h[i]); }
+          if (hi - lo < 1) hi = lo + 1;
+          for (int i = 32 - n; i < 32; i++) {
+            int bar = 1 + (int) roundf((h[i] - lo) / (hi - lo) * 7);
+            it.line(i, 8 - bar, i, 7);
+          }
+          break;
+        }
+
+        case 18: {  // snake running around the border, 1 px longer every second
+          int head = millis() / 100;  // 10 px per second
+          for (int j = 0; j <= sec; j++) {
+            int i = ((head - j) % 76 + 76) % 76, x, y;  // 76 border pixels, clockwise from top-left
+            if (i < 32)      { x = i;      y = 0; }
+            else if (i < 39) { x = 31;     y = i - 31; }
+            else if (i < 70) { x = 69 - i; y = 7; }
+            else             { x = 0;      y = 76 - i; }
+            dot(x, y);
+          }
+          it.strftime(7, 2, id(tom_font), "%H:%M", now);
+          break;
+        }
+
+        case 19: {  // self-playing Pong; left score = hours, right score = minutes
+          auto tri = [](float u) { return 1 - fabsf(fmodf(u, 2) - 1); };  // 0 -> 1 -> 0 over u = 0..2
+          int bx = 1 + (int) roundf(29 * tri(t / 2));  // one crossing per 2 s, back at the left on :00
+          int by = (int) roundf(7 * tri(t / 1.3f));
+          bool miss = sec == 59 && sub_ms >= 500;     // left paddle lets the last ball of the minute through
+          int lp = miss ? (by < 4 ? 5 : 0) : std::clamp(by - 1, 0, 5);
+          int rp = std::clamp(by - 1, 0, 5);
+          it.line(0, lp, 0, lp + 2);
+          it.line(31, rp, 31, rp + 2);
+          for (int y = 0; y < 8; y += 2) dot(16, y);  // net
+          it.printf(9, 1, id(tom_font), "%02d", now.hour);
+          it.printf(17, 1, id(tom_font), "%02d", now.minute);
+          dot(miss && bx <= 2 ? 0 : bx, by);
+          break;
+        }
+
+        case 20: {  // time for 10 s, then a starfield that speeds up and streaks into the next minute
+          if (sec < 10) {
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+            break;
+          }
+          float s = t - 10;
+          float phase = 0.15f * s + 0.0002f * s * s * s;  // integral of an ever-growing speed
+          for (uint32_t i = 0; i < 24; i++) {
+            float a = (i * 2654435761u % 6283) / 1000.0f;
+            float o = ((i * 3 + 1) * 2654435761u % 1000) / 1000.0f;
+            float d = fmodf(o + phase, 1.0f), r = d * d * 18;
+            for (float m = (sec >= 56 ? 0.6f : 1.0f); m <= 1.001f; m += 0.1f)  // streaks in the last 4 s
+              dot(roundf(16 + cosf(a) * r * m), roundf(4 + sinf(a) * r * m * 0.45f));
+          }
+          break;
+        }
+
+        case 21: {  // 10 s time, 5 s month view: one column per day
+          if (sec % 15 < 10) {
+            it.strftime(2, 0, id(digit_font), "%H:%M", now);
+            break;
+          }
+          static const int DIM[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+          int dim = DIM[now.month - 1];
+          if (now.month == 2 && (now.year % 4 == 0 && (now.year % 100 != 0 || now.year % 400 == 0))) dim = 29;
+          for (int day = 1; day <= dim; day++) {
+            int x = day - 1;
+            int dow = ((now.day_of_week - 1 + day - now.day_of_month) % 7 + 7) % 7;  // 0 = Sunday
+            if (dow == 0 || dow == 6) dot(x, 0);  // weekend marker
+            if (day < now.day_of_month)
+              it.line(x, 6, x, 7);
+            else if (day == now.day_of_month) {
+              if ((millis() / 500) % 2 == 0) it.line(x, 2, x, 7);
+            } else
+              dot(x, 7);
+          }
+          break;
+        }
+
+        case 22: {  // Matrix that forms the time. 15 s cycle: 0-5 s rain, 5-8 s drops stick into HH:MM,
+                    // 8-12 s the time, 12-15 s the digits fall off and turn back into rain
+          static const struct { int8_t l, t, a, w, n; uint8_t rows[7]; } MF[11] = {  // MobileFont glyphs
+            {0, 1, 7, 6, 7, {0x1E, 0x33, 0x33, 0x33, 0x33, 0x33, 0x1E}},  // 0
+            {0, 1, 5, 4, 7, {0x06, 0x0E, 0x06, 0x06, 0x06, 0x06, 0x0F}},  // 1
+            {0, 1, 7, 6, 7, {0x1E, 0x23, 0x03, 0x06, 0x0C, 0x18, 0x3F}},  // 2
+            {0, 1, 7, 6, 7, {0x1E, 0x23, 0x03, 0x0E, 0x03, 0x23, 0x1E}},  // 3
+            {0, 1, 7, 6, 7, {0x06, 0x0E, 0x16, 0x27, 0x3F, 0x06, 0x06}},  // 4
+            {0, 1, 7, 6, 7, {0x3F, 0x20, 0x3E, 0x03, 0x03, 0x23, 0x1E}},  // 5
+            {0, 1, 7, 6, 7, {0x1E, 0x30, 0x30, 0x3E, 0x33, 0x33, 0x1E}},  // 6
+            {0, 1, 7, 6, 7, {0x3F, 0x03, 0x06, 0x06, 0x0C, 0x0C, 0x0C}},  // 7
+            {0, 1, 7, 6, 7, {0x1E, 0x33, 0x33, 0x1E, 0x33, 0x33, 0x1E}},  // 8
+            {0, 1, 7, 6, 7, {0x1E, 0x33, 0x33, 0x1F, 0x03, 0x03, 0x1E}},  // 9
+            {0, 2, 2, 1, 6, {0x01, 0x01, 0x00, 0x00, 0x01, 0x01}},        // :
+          };
+          // HH:MM in MobileFont at x = 2, y = 0 as a bit mask, same layout as strftime(2, 0, digit_font, ...)
+          uint32_t mask[8] = {0};
+          char hhmm[6];
+          now.strftime(hhmm, sizeof(hhmm), "%H:%M");
+          for (int i = 0, cx = 2; i < 5; i++) {
+            const auto &g = MF[hhmm[i] == ':' ? 10 : hhmm[i] - '0'];
+            for (int r = 0; r < g.n; r++)
+              for (int c = 0; c < g.w; c++)
+                if ((g.rows[r] >> (g.w - 1 - c)) & 1) {
+                  int x = cx + g.l + c, y = g.t + r;
+                  if (x >= 0 && x < 32 && y >= 0 && y < 8) mask[y] |= 1u << x;
+                }
+            cx += g.a;
+          }
+          auto h32 = [](uint32_t n) { return n * 2654435761u; };
+          float G = now.minute * 60 + sec + sub_ms / 1000.0f;  // seconds into the hour
+          float tc = fmodf(G, 15);                              // seconds into the cycle
+          uint32_t frame_no = (uint32_t) (G * 20);
+          for (int x = 0; x < 32; x++) {
+            uint32_t hx = h32(x);
+            float speed = 7 + (hx >> 8) % 6;  // rows per second
+            int phase = (hx >> 16) % 16, tail = 2 + (hx >> 12) % 3;
+            float cut = 5 + ((hx >> 4) % 300) / 100.0f;            // column stops raining at 5-8 s
+            float restart = 12.5f + ((hx >> 20) % 100) / 100.0f;   // and starts again at 12.5-13.5 s
+            float fall = 12 + ((h32(x + 500) >> 4) % 100) / 100.0f;  // digits in this column drop at 12-13 s
+            // rain: drops cycle over 16 rows (8 visible); skip drops that would start in the quiet window
+            float H = phase + speed * G;
+            int n = (int) floorf(H / 16);
+            float spawn = (16 * n - phase) / speed - (G - tc);
+            if (spawn < cut || spawn >= restart) {
+              int hy = (int) floorf(H - 16 * n);
+              dot(x, hy);
+              for (int k = 1; k <= tail; k++) {
+                int y = hy - k;
+                if (y >= 0 && h32(x * 131 + y * 7 + frame_no) % 6)  // flickering tail
+                  dot(x, y);
+              }
+            }
+            // digits
+            for (int y = 0; y < 8; y++) {
+              if (!((mask[y] >> x) & 1)) continue;
+              float lock = 5 + (h32(x * 37 + y * 101) % 280) / 100.0f;  // lands somewhere in 5-7.8 s
+              if (tc < lock - 0.35f) continue;
+              if (tc < lock) {  // a drop falling into place
+                int yy = (int) roundf(y - (lock - tc) / 0.35f * 5);
+                dot(x, yy);
+                dot(x, yy - 1);
+              } else if (tc < fall) {
+                dot(x, y);
+              } else {  // released: accelerate down with a short tail
+                float dd = 0.5f * 45 * (tc - fall) * (tc - fall);
+                int yy = (int) floorf(y + dd);
+                dot(x, yy);
+                if (dd > 1) dot(x, yy - 1);
+              }
+            }
+          }
+          break;
+        }
+      }
+
+select:
+  - platform: template
+    name: "Clock Style"
+    id: clock_style
+    optimistic: true
+    restore_value: true
+    # new styles go at the end: the saved choice is stored as an index
+    options:
+      - "Tom Thumb HH:MM:SS"
+      - "Micro 5 HH:MM:SS"
+      - "MobileFont + sekundový pásik"
+      - "MobileFont + sekundový pásik dole"
+      - "Pôvodné"
+      - "Binárne hodiny"
+      - "Rolujúce číslice"
+      - "Čas a vonkajšia teplota"
+      - "Čas a deň v týždni"
+      - "Presýpacie sekundy"
+      - "Čas, ktorý sa rozpadne"
+      - "Pac-Man zje minútu"
+      - "Živé počasie"
+      - "Ručičkové hodinky"
+      - "Čas vystúpi z dažďa"
+      - "Deň v 256 bodoch"
+      - "Fáza Mesiaca"
+      - "Teplota za 24 hodín"
+      - "Had okolo hodín"
+      - "Pong hrá o čas"
+      - "Warp do novej minúty"
+      - "Mesiac v stĺpcoch"
+      - "Matrix"
+    initial_option: "Tom Thumb HH:MM:SS"
+
+number:
+  - platform: template
+    name: "Minútka (min)"
+    id: timer_minutes
+    min_value: 1
+    max_value: 99
+    step: 1
+    initial_value: 5
+    optimistic: true
+    restore_value: true
+
+switch:
+  - platform: template
+    name: "Dýchanie 4-7-8"
+    id: breath_switch
+    optimistic: true
+    turn_on_action:
+      - lambda: 'id(breath_start) = millis();'
+    turn_off_action:
+      - lambda: 'id(breath_start) = 0;'
+
+sensor:
+  - platform: homeassistant
+    id: outside_temp
+    entity_id: weather.domov
+    attribute: temperature
+    on_value:
+      - lambda: |-
+          // first value after boot starts the 24 h chart right away
+          if (id(temp_count) == 0 && !std::isnan(x)) {
+            id(temp_hist)[31] = x;
+            id(temp_count) = 1;
+          }
+
+text_sensor:
+  - platform: homeassistant
+    id: weather_state
+    entity_id: weather.domov
+
+interval:
+  - interval: 45min  # 32 samples x 45 min = 24 h
+    then:
+      - lambda: |-
+          if (std::isnan(id(outside_temp).state)) return;
+          auto &h = id(temp_hist);
+          std::rotate(h.begin(), h.begin() + 1, h.end());
+          h[31] = id(outside_temp).state;
+          if (id(temp_count) < 32) id(temp_count)++;
+
+font:
+  - file: "MobileFont.ttf"
+    id: digit_font
+    size: 10
+  - file: "tom-thumb.bdf"
+    id: tom_font
+    size: 6
+    glyphs: "0123456789:"
+  - file: "gfonts://Micro 5"
+    id: micro_font
+    size: 10
+    glyphs: "0123456789:"
+
+time:
+  # SNTP sets sub-second precision; Home Assistant time only syncs whole seconds
+  - platform: sntp
+    id: clock_time
+    timezone: Europe/Bratislava
+
+button:
+  - platform: restart
+    name: "Restart"
+  - platform: template
+    name: "Spustiť minútku"
+    on_press:
+      - lambda: |-
+          id(timer_total) = (int) id(timer_minutes).state * 60;
+          id(timer_end) = id(clock_time).now().timestamp + id(timer_total);
+  - platform: template
+    name: "Zrušiť minútku"
+    on_press:
+      - lambda: 'id(timer_end) = 0;'
+  - platform: template
+    name: "Hoď kockou"
+    on_press:
+      - lambda: |-
+          id(dice_at) = millis();
+          id(dice_a) = 1 + random_uint32() % 6;
+          id(dice_b) = 1 + random_uint32() % 6;

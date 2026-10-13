@@ -1,0 +1,7 @@
+# ESPHome build output and local secrets
+/.esphome/
+*.bin
+/secrets.yaml
+# MobileFont is donation-ware, download it yourself (see README)
+/MobileFont.ttf
+.DS_Store
