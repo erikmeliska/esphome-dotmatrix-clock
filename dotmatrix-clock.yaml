@@ -576,8 +576,9 @@ display:
           break;
         }
 
-        case 22: {  // Matrix that forms the time. 15 s cycle: 0-5 s rain, 5-8 s drops stick into HH:MM,
-                    // 8-12 s the time, 12-15 s the digits fall off and turn back into rain
+        case 22: {  // Matrix that forms the time. 10 s cycle: 0-2.5 s rain, 2.5-4 s drops stick into HH:MM,
+                    // 4-9 s the time, 9-10 s the digits fall off and turn back into rain.
+                    // Shifted by 1 s so the minute changes during the rain (time shows at :03-:08, :13-:18, ...)
           static const struct { int8_t l, t, a, w, n; uint8_t rows[7]; } MF[11] = {  // MobileFont glyphs
             {0, 1, 7, 6, 7, {0x1E, 0x33, 0x33, 0x33, 0x33, 0x33, 0x1E}},  // 0
             {0, 1, 5, 4, 7, {0x06, 0x0E, 0x06, 0x06, 0x06, 0x06, 0x0F}},  // 1
@@ -607,15 +608,15 @@ display:
           }
           auto h32 = [](uint32_t n) { return n * 2654435761u; };
           float G = now.minute * 60 + sec + sub_ms / 1000.0f;  // seconds into the hour
-          float tc = fmodf(G, 15);                              // seconds into the cycle
+          float tc = fmodf(G + 1, 10);                          // seconds into the cycle
           uint32_t frame_no = (uint32_t) (G * 20);
           for (int x = 0; x < 32; x++) {
             uint32_t hx = h32(x);
             float speed = 7 + (hx >> 8) % 6;  // rows per second
             int phase = (hx >> 16) % 16, tail = 2 + (hx >> 12) % 3;
-            float cut = 5 + ((hx >> 4) % 300) / 100.0f;            // column stops raining at 5-8 s
-            float restart = 12.5f + ((hx >> 20) % 100) / 100.0f;   // and starts again at 12.5-13.5 s
-            float fall = 12 + ((h32(x + 500) >> 4) % 100) / 100.0f;  // digits in this column drop at 12-13 s
+            float cut = 2.5f + ((hx >> 4) % 150) / 100.0f;         // column stops raining at 2.5-4 s
+            float restart = 9.3f + ((hx >> 20) % 50) / 100.0f;     // and starts again at 9.3-9.8 s
+            float fall = 9 + ((h32(x + 500) >> 4) % 50) / 100.0f;    // digits in this column drop at 9-9.5 s
             // rain: drops cycle over 16 rows (8 visible); skip drops that would start in the quiet window
             float H = phase + speed * G;
             int n = (int) floorf(H / 16);
@@ -632,7 +633,7 @@ display:
             // digits
             for (int y = 0; y < 8; y++) {
               if (!((mask[y] >> x) & 1)) continue;
-              float lock = 5 + (h32(x * 37 + y * 101) % 280) / 100.0f;  // lands somewhere in 5-7.8 s
+              float lock = 2.5f + (h32(x * 37 + y * 101) % 140) / 100.0f;  // lands somewhere in 2.5-3.9 s
               if (tc < lock - 0.35f) continue;
               if (tc < lock) {  // a drop falling into place
                 int yy = (int) roundf(y - (lock - tc) / 0.35f * 5);
@@ -641,7 +642,7 @@ display:
               } else if (tc < fall) {
                 dot(x, y);
               } else {  // released: accelerate down with a short tail
-                float dd = 0.5f * 45 * (tc - fall) * (tc - fall);
+                float dd = 0.5f * 60 * (tc - fall) * (tc - fall);  // off the bottom in < 0.5 s
                 int yy = (int) floorf(y + dd);
                 dot(x, yy);
                 if (dd > 1) dot(x, yy - 1);

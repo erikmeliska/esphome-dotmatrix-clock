@@ -37,18 +37,20 @@ Pick a style with the **Clock Style** entity in Home Assistant or in the device'
 | 19 | **Pong Plays for Time** – left score is hours, right score is minutes | ![](docs/dotmatrix-clock/19-pong.svg) |
 | 20 | **Warp to the Next Minute** – stars speed up until the jump | ![](docs/dotmatrix-clock/20-warp.svg) |
 | 21 | **Month in Columns** – one column per day, weekends marked on top | ![](docs/dotmatrix-clock/21-kalendar.svg) |
-| 22 | **Matrix** – digital rain that forms the time and then scatters again | ![](docs/dotmatrix-clock/22-matrix-3-cas.svg) |
+| 22 | **Matrix** – 5 s of digital rain, 5 s of time formed from it | ![](docs/dotmatrix-clock/22-matrix-3-cas.svg) |
 
 The temperature chart (17) lives only in the device's memory: it starts over after a restart and shows a full day after 24 hours.
 
-## Matrix in a 15-second cycle
+## Matrix in a 10-second cycle
+
+Roughly 5 s of rain (including both transitions) and 5 s of time. The cycle is shifted by one second so the minute always changes during the rain; the time is shown at :03–:08, :13–:18, :23–:28 and so on.
 
 | Phase | Preview |
 |---|---|
-| 0–5 s: rain falls | ![](docs/dotmatrix-clock/22-matrix-1-dazd.svg) |
-| 5–8 s: drops land in the shape of the digits and stick | ![](docs/dotmatrix-clock/22-matrix-2-formovanie.svg) |
-| 8–12 s: the time is shown | ![](docs/dotmatrix-clock/22-matrix-3-cas.svg) |
-| 12–15 s: the digits fall off and turn back into rain | ![](docs/dotmatrix-clock/22-matrix-4-pad.svg) |
+| 0–2.5 s: rain falls | ![](docs/dotmatrix-clock/22-matrix-1-dazd.svg) |
+| 2.5–4 s: drops land in the shape of the digits and stick | ![](docs/dotmatrix-clock/22-matrix-2-formovanie.svg) |
+| 4–9 s: the time is shown | ![](docs/dotmatrix-clock/22-matrix-3-cas.svg) |
+| 9–10 s: the digits fall off and turn back into rain | ![](docs/dotmatrix-clock/22-matrix-4-pad.svg) |
 
 ## Home Assistant extras
 
